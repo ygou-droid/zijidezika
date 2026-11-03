@@ -1,0 +1,16 @@
+# 依赖
+node_modules/
+package-lock.json
+
+# 密钥等敏感信息（真实密钥放在根目录的 .env 里，不要提交）
+.env
+.env.local
+.env.*.local
+
+# 日志
+*.log
+logs/
+
+# 系统文件
+.DS_Store
+Thumbs.db

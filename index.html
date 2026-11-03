@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Mochi Chat · 麻薯聊天</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app show-space">
+
+    <!-- ===== 阶段 5.4：全屏背景层（预设渐变 / 用户上传图 / 暗色遮罩 / 昼夜光影） ===== -->
+    <div class="space-bg" id="spaceBg" data-bg="default" aria-hidden="true"></div>
+    <div class="chat-bg" id="chatBg" aria-hidden="true"></div>
+    <div class="space-veil" id="spaceVeil" aria-hidden="true"></div>
+    <div class="space-light is-day" id="spaceLight" aria-hidden="true"></div>
+
+    <!-- 桌面小组件：时间 / 日期 + 相框位（仅主页显示） -->
+    <div class="home-widgets" id="homeWidgets">
+      <div class="widget-card home-clock-card">
+        <p class="home-clock" id="homeClock">--:--</p>
+        <p class="home-date" id="homeDate">加载中…</p>
+      </div>
+      <!-- 阶段 5.11：天气组件（真实 API，点地区切换城市） -->
+      <div class="widget-card home-weather" id="homeWeather">
+        <div class="weather-head">
+          <button class="weather-city" id="weatherCityBtn" type="button" title="点击切换地区">北京</button>
+          <span class="weather-sunrise" id="weatherSunrise">日出 --:--</span>
+        </div>
+        <div class="weather-main">
+          <span class="weather-temp" id="weatherTemp">--°</span>
+          <span class="weather-desc" id="weatherDesc">获取中…</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 桌面中央：梦角情话（仅主页显示） -->
+    <div class="home-quote" id="homeQuote">
+      <p class="home-quote-text" id="homeQuoteText">想对你说一句温柔的话。</p>
+      <p class="home-quote-from" id="homeQuoteFrom">—— 小麻薯</p>
+    </div>
+
+    <!-- 左侧：联系人栏 -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <span class="logo-dot"></span>
+          <span class="logo-text" id="logoText">Mochi Chat</span>
+        </div>
+        <p class="logo-sub" id="logoSub">麻薯聊天 · 温柔的对话</p>
+        <!-- 阶段 5.11：新建联系人改成右上角的紫色小爱心 -->
+        <button class="add-contact-heart" id="addContactBtn" type="button" title="新建联系人" aria-label="新建联系人">💜</button>
+      </div>
+
+      <!-- 联系人列表由 script.js 根据数据自动生成 -->
+      <ul class="contact-list" id="contactList"></ul>
+
+      <div class="sidebar-footer">
+        <button class="me-profile" id="openProfileBtn" type="button" title="修改我的资料">
+          <span class="me-avatar" id="meAvatar">我</span>
+          <span class="me-name" id="meName">我的账号</span>
+          <span class="me-edit">编辑</span>
+        </button>
+      </div>
+
+      <!-- 阶段 5.5：旧入口已从界面移除，仅保留节点供 cards.js / 模型面板调用 -->
+      <div class="legacy-entries" hidden aria-hidden="true">
+        <button id="openCardsBtn" type="button">字卡库</button>
+        <button id="openProviderBtn" type="button">模型</button>
+      </div>
+    </aside>
+
+    <!-- 右侧：聊天区 -->
+    <main class="chat" id="chat">
+
+      <header class="chat-header">
+        <button class="back-btn" id="backBtn" type="button" aria-label="返回联系人">‹</button>
+        <div class="avatar avatar-pink" id="chatAvatar">麻</div>
+        <div class="chat-title">
+          <h1 id="chatName">小麻薯</h1>
+          <span class="status is-online" id="chatStatus">在线</span>
+        </div>
+      </header>
+
+      <!-- 调试信息区域：显示本次匹配的字卡、关键词与分数 -->
+      <section class="debug-panel is-empty" id="debugPanel">
+        <div class="debug-head">
+          <span class="debug-title">字卡匹配调试</span>
+          <button class="debug-toggle" id="debugToggle" type="button">收起</button>
+        </div>
+        <div class="debug-body" id="debugBody">
+          <p class="debug-placeholder">发送一条消息后，这里会显示匹配到的字卡、关键词和分数。</p>
+        </div>
+      </section>
+
+      <!-- 消息列表（内容由 script.js 按当前联系人生成） -->
+      <div class="messages" id="messages"></div>
+
+      <!-- 底部输入区 -->
+      <form class="composer" id="composer" autocomplete="off">
+        <input
+          type="text"
+          id="input"
+          class="input"
+          placeholder="说点什么吧…（按 Enter 发送）"
+          maxlength="200"
+        />
+        <button type="submit" class="send-btn" id="sendBtn">发送</button>
+      </form>
+    </main>
+
+    <!-- ===== 阶段 5.7：朋友圈（点聊天顶部头像打开） ===== -->
+    <div class="moments-panel" id="momentsPanel" hidden>
+      <div class="moments-card">
+        <div class="moments-cover" id="momentsCover">
+          <button class="moments-icon-btn" id="momentsCloseBtn" type="button" aria-label="关闭朋友圈">×</button>
+          <button class="moments-icon-btn moments-publish-btn" id="momentsPublishBtn" type="button">发布</button>
+          <button class="moments-cover-btn" id="momentsCoverBtn" type="button">更换封面</button>
+          <input type="file" id="momentsCoverInput" accept="image/*" hidden />
+        </div>
+
+        <div class="moments-profile">
+          <div class="avatar avatar-pink moments-avatar" id="momentsAvatar">麻</div>
+          <div class="moments-profile-text">
+            <h2 class="moments-name" id="momentsName">小麻薯</h2>
+            <span class="moments-signature" id="momentsSignature">记录一点小事</span>
+          </div>
+        </div>
+
+        <div class="moments-compose" id="momentsCompose" hidden>
+          <textarea
+            class="moments-compose-text"
+            id="momentsComposeText"
+            maxlength="300"
+            placeholder="这一刻的想法…"
+            aria-label="朋友圈正文"
+          ></textarea>
+          <div class="moments-compose-actions">
+            <span class="moments-compose-count" id="momentsComposeCount">0/300</span>
+            <button class="moments-btn ghost" id="momentsComposeCancel" type="button">取消</button>
+            <button class="moments-btn primary" id="momentsComposeSubmit" type="button">发表</button>
+          </div>
+        </div>
+
+        <div class="moments-list" id="momentsList"></div>
+      </div>
+    </div>
+
+    <!-- ===== 字卡库（点左侧「字卡库」打开） ===== -->
+    <section class="cards-view" id="cardsView">
+      <header class="cards-header">
+        <div class="cards-title">
+          <h2>字卡库</h2>
+          <span class="cards-sub" id="cardsOwnerText">小麻薯 · 0 张字卡</span>
+        </div>
+
+        <label class="owner-picker">
+          <span>查看</span>
+          <select id="libraryOwner"></select>
+        </label>
+
+        <button class="icon-btn" id="closeCardsBtn" type="button" aria-label="关闭字卡库">×</button>
+      </header>
+
+      <div class="cards-toolbar">
+        <input
+          type="search"
+          id="cardSearch"
+          class="cards-search"
+          placeholder="搜索内容、关键词或场景…"
+        />
+        <button class="primary-btn" id="newCardBtn" type="button">+ 新建字卡</button>
+        <button class="ghost-btn" id="importCardsBtn" type="button">批量导入</button>
+      </div>
+
+      <div class="category-bar type-bar" id="cardTypeBar"></div>
+      <div class="category-bar" id="categoryBar"></div>
+
+      <div class="cards-body">
+        <div class="card-grid" id="cardGrid"></div>
+        <p class="cards-empty" id="cardsEmpty" hidden>这里还没有字卡，点「新建字卡」添加一张吧～</p>
+      </div>
+    </section>
+
+    <!-- ===== 阶段 5.4：底部悬浮 Dock ===== -->
+    <nav class="dock" id="dock" aria-label="主控台导航">
+      <button class="dock-btn" id="dockHomeBtn" type="button" title="主页">
+        <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 10.5 12 4l8 6.5" />
+          <path d="M6.5 9.5V20h11V9.5" />
+        </svg>
+        <span class="dock-label">主页</span>
+      </button>
+      <button class="dock-btn" id="dockChatBtn" type="button" title="聊天">
+        <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M20 12.5c0 3.6-3.6 6.5-8 6.5-1 0-2-.15-2.9-.42L5 20.5l1.2-3.1C4.8 16.2 4 14.4 4 12.5 4 8.9 7.6 6 12 6s8 2.9 8 6.5Z" />
+        </svg>
+        <span class="dock-label">聊天</span>
+      </button>
+      <button class="dock-btn" id="dockContactsBtn" type="button" title="联系人">
+        <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="9" cy="9" r="3" />
+          <path d="M3.5 19c.6-3 2.9-4.6 5.5-4.6S14 16 14.6 19" />
+          <path d="M16 7.2a2.8 2.8 0 0 1 0 5.6" />
+          <path d="M17.2 15.2c1.9.5 3.1 1.9 3.5 3.8" />
+        </svg>
+        <span class="dock-label">联系人</span>
+      </button>
+      <button class="dock-btn" id="dockCardsBtn" type="button" title="字卡">
+        <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="4" y="6.5" width="12" height="13" rx="2.2" />
+          <path d="M8 3.5h9.5A2.5 2.5 0 0 1 20 6v11" />
+        </svg>
+        <span class="dock-label">字卡</span>
+      </button>
+      <button class="dock-btn" id="dockSettingsBtn" type="button" title="设置">
+        <svg class="dock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 3.5v2.2M12 18.3v2.2M4.9 7.8l1.9 1.1M17.2 15.1l1.9 1.1M4.9 16.2l1.9-1.1M17.2 8.9l1.9-1.1" />
+        </svg>
+        <span class="dock-label">设置</span>
+      </button>
+    </nav>
+
+    <!-- ===== 阶段 5.4：设置面板（外观 + 空间背景 + 模型服务） ===== -->
+    <div class="settings-panel" id="settingsPanel" hidden>
+      <div class="settings-card">
+        <div class="settings-head">
+          <span>设置</span>
+          <button class="style-close" id="settingsCloseBtn" type="button" aria-label="关闭设置">×</button>
+        </div>
+
+        <!-- 阶段 5.5：基础资料（头像 + 昵称），改动实时联动聊天界面 -->
+        <div class="profile-block" id="profileBlock">
+          <div class="profile-row">
+            <span class="profile-label">我的资料</span>
+            <div class="profile-main">
+              <span class="avatar avatar-me" id="meAvatarPreview">我</span>
+              <label class="profile-upload">
+                更换头像
+                <input type="file" id="meAvatarFile" accept="image/*" hidden />
+              </label>
+              <input
+                type="text"
+                class="profile-name-input"
+                id="meNameInput"
+                maxlength="20"
+                placeholder="我的昵称"
+                aria-label="我的昵称"
+              />
+            </div>
+          </div>
+
+          <div class="profile-row">
+            <span class="profile-label">当前联系人</span>
+            <div class="profile-main">
+              <span class="avatar avatar-pink" id="contactAvatarPreview">麻</span>
+              <label class="profile-upload">
+                更换头像
+                <input type="file" id="contactAvatarFile" accept="image/*" hidden />
+              </label>
+              <input
+                type="text"
+                class="profile-name-input"
+                id="contactNameInput"
+                maxlength="20"
+                placeholder="联系人昵称"
+                aria-label="联系人昵称"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- 外观：原顶部「外观」面板整体搬进设置 -->
+        <div class="style-panel" id="stylePanel">
+          <div class="style-field">
+            <span class="style-label">聊天模式</span>
+            <div class="style-mode-options">
+              <button class="style-mode-btn" id="modeBubbleBtn" type="button">气泡模式</button>
+              <button class="style-mode-btn" id="modeInterviewBtn" type="button">杂志访谈</button>
+            </div>
+          </div>
+
+          <div class="style-section style-section-bubble">
+            <div class="style-field">
+              <span class="style-label">气泡颜色</span>
+              <div class="style-color-options" id="styleColorOptions"></div>
+              <input type="color" id="styleColorInput" aria-label="自定义气泡颜色" />
+            </div>
+            <div class="style-field">
+              <span class="style-label">透明度：<b id="styleOpacityValue">86%</b></span>
+              <input type="range" id="styleOpacityInput" min="0.3" max="1" step="0.02" aria-label="气泡透明度" />
+            </div>
+            <label class="style-inline">
+              <input type="checkbox" id="styleGlassInput" /> 毛玻璃效果
+            </label>
+          </div>
+
+          <div class="style-field">
+            <span class="style-label">桌面壁纸（作用于整个桌面）</span>
+            <input type="file" id="styleBgFile" accept="image/*" class="style-bg-file" />
+            <button class="style-clear-bg" id="styleClearBgBtn" type="button">清除壁纸</button>
+          </div>
+
+          <div class="style-field">
+            <span class="style-label">聊天框背景（仅聊天内容区）</span>
+            <input type="file" id="chatPanelBgFile" accept="image/*" class="style-bg-file" />
+            <button class="style-clear-bg" id="chatPanelBgClearBtn" type="button">清除聊天背景</button>
+          </div>
+
+          <div class="style-field">
+            <span class="style-label">空间背景</span>
+            <div class="space-bg-options" id="spaceBgOptions"></div>
+          </div>
+
+          <div class="style-field">
+            <span class="style-label">桌面背景不透明度：<b id="spaceBgOpacityValue">0%</b></span>
+            <input
+              type="range"
+              id="spaceBgOpacityInput"
+              min="0"
+              max="100"
+              step="1"
+              value="0"
+              aria-label="桌面背景不透明度，0 为完全透明（壁纸清晰），100 为完全不透明（实心暗色）"
+            />
+          </div>
+
+          <div class="style-field">
+            <span class="style-label">面板毛玻璃不透明度：<b id="panelOpacityValue">65%</b></span>
+            <input
+              type="range"
+              id="panelOpacityInput"
+              min="0"
+              max="100"
+              step="1"
+              value="65"
+              aria-label="面板毛玻璃不透明度，0 为完全透明，100 为完全不透明"
+            />
+          </div>
+        </div>
+
+        <!-- 阶段 5.6：角色状态（当前状态 / 自定义状态 / 时间自动切换） -->
+        <div class="status-block" id="statusBlock">
+          <div class="status-row">
+            <span class="style-label">角色状态：<b id="statusTargetName">小麻薯</b></span>
+            <select class="status-select" id="statusCurrentSelect" aria-label="当前状态"></select>
+          </div>
+
+          <div class="status-row">
+            <span class="style-label">回复行为（作用于上面选中的状态，预设状态也能改）</span>
+            <div class="status-behavior">
+              <label class="status-field">
+                <span>回复延迟：<b id="statusDelayValue">0s</b></span>
+                <input type="range" id="statusDelayInput" min="0" max="10" step="0.5" value="0" aria-label="回复延迟，单位秒" />
+              </label>
+              <label class="status-field">
+                <span>回复概率：<b id="statusProbValue">100%</b></span>
+                <input type="range" id="statusProbInput" min="0" max="100" step="5" value="100" aria-label="回复概率，百分比" />
+              </label>
+              <label class="status-field">
+                <span>状态匹配加权：<b id="statusWeightValue">×1.4</b></span>
+                <input type="range" id="statusWeightInput" min="1" max="3" step="0.1" value="1.4" aria-label="该状态下字卡匹配加权倍数" />
+              </label>
+            </div>
+          </div>
+
+          <div class="status-row">
+            <span class="style-label">自定义状态</span>
+            <div class="status-inline">
+              <input class="status-text" id="statusCustomLabel" type="text" maxlength="10" placeholder="状态名，如：干饭中" />
+              <input class="status-color" id="statusCustomColor" type="color" value="#7FC8F8" aria-label="自定义状态颜色" />
+              <button class="settings-btn status-add-btn" id="statusCustomAddBtn" type="button">添加</button>
+            </div>
+            <ul class="status-list" id="statusCustomList"></ul>
+          </div>
+
+          <div class="status-row">
+            <span class="style-label">时间自动切换</span>
+            <div class="status-inline">
+              <input class="status-time" id="statusScheduleStart" type="time" value="23:00" aria-label="开始时间" />
+              <span class="status-dash">→</span>
+              <input class="status-time" id="statusScheduleEnd" type="time" value="07:00" aria-label="结束时间" />
+              <select class="status-select" id="statusScheduleStatus" aria-label="自动切换到的状态"></select>
+              <button class="settings-btn status-add-btn" id="statusScheduleAddBtn" type="button">添加</button>
+            </div>
+            <ul class="status-list" id="statusScheduleList"></ul>
+          </div>
+        </div>
+
+        <!-- 阶段 5.11：应用信息（主标题 / 副标题） -->
+        <div class="status-block" id="appInfoBlock">
+          <div class="status-row">
+            <span class="style-label">应用信息（实时同步到左上角）</span>
+            <label class="style-field">
+              <span class="style-label">主标题</span>
+              <input class="status-text app-info-input" id="appTitleInput" type="text" maxlength="24" placeholder="Mochi Chat" />
+            </label>
+            <label class="style-field">
+              <span class="style-label">副标题</span>
+              <input class="status-text app-info-input" id="appSubtitleInput" type="text" maxlength="40" placeholder="麻薯聊天 · 温柔的对话" />
+            </label>
+          </div>
+        </div>
+
+        <!-- 阶段 5.7.2：朋友圈互动（自动发圈 / 点赞 / 评论概率） -->
+        <div class="status-block" id="momentsSettingsBlock">
+          <div class="status-row">
+            <span class="style-label">朋友圈互动：<b id="momentsTargetName">小麻薯</b></span>
+          </div>
+          <div class="style-field">
+            <span class="style-label">自动发圈频率：<b id="momentsAutoPostValue">30%</b><em class="moments-hint" id="momentsAutoPostHint">约每小时 0.3 条</em></span>
+            <input
+              type="range"
+              id="momentsAutoPostInput"
+              min="0"
+              max="100"
+              step="5"
+              value="30"
+              aria-label="每小时自动发一条朋友圈的概率，0 为关闭"
+            />
+          </div>
+          <div class="style-field">
+            <span class="style-label">点赞概率：<b id="momentsLikeValue">80%</b></span>
+            <input
+              type="range"
+              id="momentsLikeInput"
+              min="0"
+              max="100"
+              step="5"
+              value="80"
+              aria-label="梦见角色点赞我发的动态的概率"
+            />
+          </div>
+          <div class="style-field">
+            <span class="style-label">评论概率：<b id="momentsCommentValue">50%</b></span>
+            <input
+              type="range"
+              id="momentsCommentInput"
+              min="0"
+              max="100"
+              step="5"
+              value="50"
+              aria-label="梦角评论我发的动态的概率"
+            />
+          </div>
+
+          <label class="style-inline moments-cross-row">
+            <input type="checkbox" id="momentsCrossInput" checked />
+            允许其他角色互相评论（我发动态时，其他角色也会来点赞评论）
+          </label>
+
+          <div class="style-field">
+            <button class="moments-test-btn" id="momentsTestPostBtn" type="button">
+              立即让 TA 发一条动态
+            </button>
+          </div>
+        </div>
+
+        <div class="settings-actions">
+          <button class="settings-btn" id="settingsProviderBtn" type="button">
+            <b>模型服务</b>
+            <span>本地 Ollama 或云端 Embedding，查看可用状态</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 新建 / 编辑字卡弹窗 ===== -->
+  <div class="modal" id="cardModal" hidden>
+    <div class="modal-mask" data-close></div>
+    <form class="modal-panel" id="cardForm">
+      <h3 id="modalTitle">新建字卡</h3>
+
+      <label class="field">
+        <span class="field-label">字卡内容</span>
+        <textarea id="cardContent" rows="3" maxlength="200" placeholder="想对 TA 说的话…"></textarea>
+      </label>
+
+      <label class="field">
+        <span class="field-label">类型（决定字卡用在哪里）</span>
+        <select id="cardType">
+          <option value="chat">聊天字卡（对话匹配用）</option>
+          <option value="quote">桌面情话（主页中央卡片）</option>
+          <option value="moment_post">朋友圈文案（自动发圈用）</option>
+          <option value="moment_reply">朋友圈评论（自动评论用）</option>
+          <option value="signature">个性签名（朋友圈头像下方展示）</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="field-label">分类</span>
+        <input id="cardCategory" type="text" list="categoryOptions" maxlength="20" placeholder="例如：安慰" />
+        <datalist id="categoryOptions"></datalist>
+      </label>
+
+      <label class="field">
+        <span class="field-label">关键词（用逗号分隔）</span>
+        <input id="cardKeywords" type="text" maxlength="60" placeholder="例如：低落, 拥抱, 陪伴" />
+      </label>
+
+      <label class="field">
+        <span class="field-label">适用场景</span>
+        <input id="cardScene" type="text" maxlength="40" placeholder="例如：对方心情低落时" />
+      </label>
+
+      <label class="field">
+        <span class="field-label">分配给联系人</span>
+        <select id="cardOwner"></select>
+      </label>
+
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" id="cancelCardBtn">取消</button>
+        <button type="submit" class="primary-btn">保存</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ===== 删除确认弹窗 ===== -->
+  <div class="modal" id="confirmModal" hidden>
+    <div class="modal-mask" data-close></div>
+    <div class="modal-panel modal-small">
+      <h3>删除字卡</h3>
+      <p class="confirm-text" id="confirmText">确定要删除这张字卡吗？</p>
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" id="cancelDeleteBtn">取消</button>
+        <button type="button" class="danger-btn" id="confirmDeleteBtn">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 模型服务（向量供应商）切换面板 ===== -->
+  <div class="modal" id="providerModal" hidden>
+    <div class="modal-mask" data-close></div>
+    <div class="modal-panel provider-panel">
+      <h3>模型服务</h3>
+      <p class="provider-current" id="providerCurrent">正在读取当前模型…</p>
+
+      <!-- 阶段 5.12：自定义凭据（仅存本地浏览器，不上传服务器数据库） -->
+      <div class="custom-credentials">
+        <p class="custom-credentials-title">自定义凭据（可选，优先于服务端默认配置）</p>
+
+        <label class="custom-cred-field">
+          <span class="custom-cred-label">云端百炼 API Key</span>
+          <span class="custom-cred-input">
+            <input type="password" id="customApiKeyInput" placeholder="留空则使用系统默认" autocomplete="off" spellcheck="false" />
+            <button type="button" id="customApiKeyToggle" class="custom-cred-toggle" aria-label="显示或隐藏密钥">显示</button>
+          </span>
+        </label>
+
+        <label class="custom-cred-field">
+          <span class="custom-cred-label">Ollama 服务地址</span>
+          <input type="text" id="customOllamaHostInput" placeholder="http://你的Ollama服务地址:端口" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <label class="custom-cred-field">
+          <span class="custom-cred-label">Ollama 模型名称</span>
+          <input type="text" id="customOllamaModelInput" placeholder="qwen3-embedding:0.6b" autocomplete="off" spellcheck="false" />
+        </label>
+
+        <p class="custom-cred-note">凭据仅保存在您的本地浏览器中，不会上传至服务器数据库。</p>
+      </div>
+
+      <ul class="provider-list" id="providerList"></ul>
+
+      <p class="provider-message" id="providerMessage" hidden></p>
+
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" id="refreshProviderBtn">刷新状态</button>
+        <button type="button" class="primary-btn" id="closeProviderBtn">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 批量导入字卡（阶段 4.1） ===== -->
+  <div class="modal" id="importModal" hidden>
+    <div class="modal-mask" data-close></div>
+    <div class="modal-panel import-panel">
+      <h3>批量导入字卡</h3>
+
+      <p class="import-tip">
+        导入到：<b id="importTarget">当前联系人</b><br />
+        TXT：一行一张字卡；也可以用「问：… / 答：…」或「内容：… 分类：… 关键词：… 场景：…」，空行分隔。<br />
+        JSON：字卡数组，如 [{ "content": "今天辛苦啦", "category": "安慰", "keywords": ["疲惫"], "scene": "对方很累时" }]。
+      </p>
+
+      <input class="import-file" type="file" id="importFile" accept=".txt,.json,text/plain,application/json" />
+
+      <p class="import-loading" id="importLoading" hidden>正在解析文件，请稍候…</p>
+      <p class="import-summary" id="importSummary" hidden></p>
+
+      <p class="import-auto-note" id="importAutoNote" hidden></p>
+
+      <div class="import-tools">
+        <button type="button" class="ghost-btn" id="detectDupeBtn" disabled>检测查重</button>
+        <button type="button" class="ghost-btn" id="selectAllBtn" disabled>全选</button>
+        <button type="button" class="ghost-btn" id="selectNoneBtn" disabled>全不选</button>
+      </div>
+
+      <ul class="import-preview" id="importPreview"></ul>
+      <ul class="import-errors" id="importErrors"></ul>
+
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" id="cancelImportBtn">取消</button>
+        <button type="button" class="primary-btn" id="confirmImportBtn" disabled>确认导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段 5.10：我的资料卡弹窗（点侧栏「我」打开） ===== -->
+  <div class="modal" id="meProfileModal" hidden>
+    <div class="modal-mask" data-close-me></div>
+    <div class="modal-panel modal-small">
+      <h3>我的资料卡</h3>
+
+      <div class="me-card-body">
+        <button class="me-card-avatar" id="meProfileAvatarBtn" type="button" title="点击更换头像" aria-label="更换我的头像">
+          <span class="avatar avatar-me" id="meProfileAvatar">我</span>
+        </button>
+        <label class="field me-card-field">
+          <span class="field-label">昵称</span>
+          <input type="text" id="meProfileNameInput" maxlength="20" placeholder="给自己起个名字" />
+        </label>
+      </div>
+
+      <p class="me-card-tip">点头像可以换一张图片（600KB 以内）</p>
+      <input type="file" id="meProfileAvatarFile" accept="image/*" hidden />
+
+      <div class="modal-actions">
+        <button type="button" class="primary-btn" id="closeMeProfileBtn">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 阶段 5.11：天气地区切换弹窗 ===== -->
+  <div class="modal" id="weatherCityModal" hidden>
+    <div class="modal-mask" data-close-weather></div>
+    <form class="modal-panel modal-small" id="weatherCityForm">
+      <h3>切换地区</h3>
+      <label class="field">
+        <span class="field-label">城市名</span>
+        <input type="text" id="weatherCityInput" maxlength="20" placeholder="例如：北京 / 上海 / 杭州" autocomplete="off" />
+      </label>
+      <p class="me-card-tip">支持中文城市名，保存后会立即拉取当地天气</p>
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" id="cancelWeatherCityBtn">取消</button>
+        <button type="submit" class="primary-btn">保存</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ===== 阶段 5.10：新建联系人弹窗 ===== -->
+  <div class="modal" id="addContactModal" hidden>
+    <div class="modal-mask" data-close-add></div>
+    <form class="modal-panel modal-small" id="addContactForm">
+      <h3>新建联系人</h3>
+
+      <label class="field">
+        <span class="field-label">昵称</span>
+        <input type="text" id="addContactName" maxlength="20" placeholder="想叫 TA 什么？" autocomplete="off" />
+      </label>
+
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" id="cancelAddContactBtn">取消</button>
+        <button type="submit" class="primary-btn">创建</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="script.js"></script>
+  <script src="cards.js"></script>
+  <script src="matcher.js"></script>
+  <script src="custom-keys.js"></script>
+  <script src="ai-match.js"></script>
+  <script src="embedding-switch-ui.js"></script>
+  <script src="card-import-ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+{
+  "name": "mochi-chat",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mochi Chat · 麻薯聊天（本地 Node.js 后端 + 纯前端页面）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "test": "node matcher.test.js && node test/api-embed.test.js && node test/ai-match.test.js && node test/embedding-provider.test.js && node test/embedding-local.test.js && node test/vector-cache.test.js && node test/ai-match-identity.test.js && node test/embedding-readiness.test.js && node test/embedding-switch.test.js && node test/embedding-switch-ui.test.js && node test/host-redaction.test.js && node test/embedding-ux-3.7.test.js && node test/cards-import.test.js && node test/cards-dedupe.test.js && node test/cards-auto-tag.test.js",
+    "test:matcher": "node matcher.test.js",
+    "test:api": "node test/api-embed.test.js",
+    "test:ai": "node test/ai-match.test.js",
+    "test:provider": "node test/embedding-provider.test.js",
+    "test:local": "node test/embedding-local.test.js",
+    "test:cache": "node test/vector-cache.test.js",
+    "test:identity": "node test/ai-match-identity.test.js",
+    "test:readiness": "node test/embedding-readiness.test.js",
+    "test:switch": "node test/embedding-switch.test.js",
+    "test:switch-ui": "node test/embedding-switch-ui.test.js",
+    "test:host-redaction": "node test/host-redaction.test.js",
+    "test:ux": "node test/embedding-ux-3.7.test.js",
+    "test:import": "node test/cards-import.test.js",
+    "test:dedupe": "node test/cards-dedupe.test.js",
+    "test:auto-tag": "node test/cards-auto-tag.test.js",
+    "test:chat-style": "node test/space-chat-style-5.3.test.js"
+  },
+  "engines": {
+    "node": ">=20.12"
+  },
+  "dependencies": {
+    "express": "^4.22.3"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.3"
+  }
+}
