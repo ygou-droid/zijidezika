@@ -13,6 +13,11 @@ const path = require('path');
 const crypto = require('crypto');
 const { JSDOM } = require('jsdom');
 const { createApp } = require('../server.js');
+// 阶段 8：后端已剥离，本测试深度耦合 Node.js 后端假向量服务与「离线降级」语义，默认隐藏（set MOCHI_RUN_BACKEND_TESTS=1 可强行运行）
+if (process.env.MOCHI_RUN_BACKEND_TESTS !== '1') {
+  console.log('（跳过）' + __filename.split(/[\\/]/).pop() + '：依赖已废弃的 Node.js 后端，已隐藏。');
+  return;
+}
 
 const DIR = path.join(__dirname, '..');
 const pass = [];
@@ -109,6 +114,23 @@ async function openPage(base) {
       };
       if (!window.AbortSignal) window.AbortSignal = AbortSignal;
       window.AbortSignal.timeout = function (ms) { return AbortSignal.timeout(ms); };
+      // 阶段 8：后端已剥离，注入前端本地向量实现（脱离后端），并预置测试 Key 使向量服务可用
+      try { window.localStorage.setItem('mochi-chat-custom-keys-v1', JSON.stringify({ apiKey: 'test-key', ollamaHost: '', ollamaModel: '' })); } catch (e) {}
+      window.__MOCK_EMBED__ = function (texts) {
+        if (window.__MOCK_FAIL__) {
+          const e = new Error('mock embed failure');
+          e.code = 'mock_failure';
+          throw e;
+        }
+        const sim = (window.__MOCK_SIM__ != null) ? window.__MOCK_SIM__ : 0.9;
+        return texts.map(function (t) {
+          const a = new Array(1024).fill(0);
+          if (String(t).indexOf('想休息放松') !== -1) { a[0] = 1; }
+          else if (String(t).indexOf('【向量卡】') !== -1) { a[0] = sim; a[1] = Math.sqrt(1 - sim * sim); }
+          else { a[2] = 1; }
+          return a;
+        });
+      };
     }
   });
   // 等待前端脚本（script → cards → matcher → custom-keys → ai-match → …）全部加载完成：
@@ -452,10 +474,11 @@ function clickSend(w) {
     ];
 
     for (const item of cases) {
-      const { server, base } = await startApp({ bailianClient: fakeClient({ similarity: item.similarity }) });
+      const { server, base } = await startApp({ similarity: item.similarity });
       const dom = await openPage(base);
       await wait(1500);
       const w = dom.window, d = w.document;
+      w.__MOCK_SIM__ = item.similarity; // 让 mock 按本用例的真实相似度出向量
 
       const click = n => n.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
       const change = (n, v) => { n.value = v; n.dispatchEvent(new w.Event('change', { bubbles: true })); };

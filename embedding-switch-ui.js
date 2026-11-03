@@ -1,16 +1,12 @@
 // =======================================================
-// Mochi Chat · 模型服务切换面板（双模型改造 · 阶段 3.5）
+// Mochi Chat · 模型服务面板（阶段 8 · 纯前端静态化）
 //
-// 只做三件事：
-//   1. 读 GET /api/embedding/status   —— 当前身份与可用性
-//   2. 读 GET /api/embedding/providers —— 可选供应商清单（含各自状态）
-//   3. 发 POST /api/embedding/switch   —— 切换，并把结果如实显示
+// 阶段 8 起已经没有后端，本面板只做两件事：
+//   1. 展示当前生效的模型服务（来自用户在面板里填的 Key / 地址，前端本地判断）
+//   2. 提供「测试连接」按钮，由浏览器直接发一次真实向量请求来验证配置是否可用
 //
-// 刻意不做的：
-//   - 不展示任何 host、端口、密钥或环境变量（后端已脱敏，前端也不展示）
-//   - 不自己维护一套身份/缓存作废逻辑，切换成功后调用
-//     window.MochiChatAI.refreshIdentity()，复用既有的身份失效机制
-//   - 不碰关键词匹配、字卡、联系人等任何既有模块
+// 不再有任何后端状态检查接口（/api/embedding/status、/api/embedding/providers、
+// /api/embedding/switch 都已随后端一起移除）。明文 Key 只活在请求链路里。
 // =======================================================
 
 (function () {
@@ -25,70 +21,46 @@
   const refreshBtn = document.getElementById('refreshProviderBtn');
   const closeBtn = document.getElementById('closeProviderBtn');
   const openBtn = document.getElementById('openProviderBtn');
+  const testBtn = document.getElementById('testProviderBtn');
 
   const TIMEOUT_MS = 8000;
 
-  // phase: idle | checking | switching | error | done
+  // phase: idle | checking | testing | error | ok
   const state = {
     phase: 'idle',
     providers: [],
     currentProviderId: null,
-    defaultProviderId: null,
-    switchingEnabled: true,
-    pendingProviderId: null,
     message: '',
     errorCode: null
   };
 
-  // 阶段 3.7：切换期间把聊天输入框锁住，避免「切换途中发出脏请求」
-  let lockedBySwitch = false;
-  function lockComposer(locked) {
+  // 阶段 3.7：切换 / 测试期间把聊天输入框锁住，避免「操作中发出脏请求」
+  let locked = false;
+  function lockComposer(isLocked) {
     const input = document.getElementById('input');
     const send = document.getElementById('sendBtn');
     const composer = document.getElementById('composer');
     if (!input) return;
 
-    if (locked) {
-      if (lockedBySwitch) return; // 已经锁了就别再覆盖原始 placeholder
+    if (isLocked) {
+      if (locked) return;
       if (!input.dataset.originalPlaceholder) {
         input.dataset.originalPlaceholder = input.placeholder || '';
       }
-      lockedBySwitch = true;
+      locked = true;
       input.disabled = true;
-      input.placeholder = '正在切换模型…';
+      input.placeholder = '正在验证模型服务…';
       if (send) send.disabled = true;
       if (composer) composer.classList.add('is-switching');
       return;
     }
 
-    if (!lockedBySwitch) return;
-    lockedBySwitch = false;
+    if (!locked) return;
+    locked = false;
     input.disabled = false;
     input.placeholder = input.dataset.originalPlaceholder || '说点什么吧…（按 Enter 发送）';
     if (send) send.disabled = false;
     if (composer) composer.classList.remove('is-switching');
-  }
-
-  function timeoutSignal() {
-    if (window.AbortSignal && typeof window.AbortSignal.timeout === 'function') {
-      return window.AbortSignal.timeout(TIMEOUT_MS);
-    }
-    return undefined;
-  }
-
-  // 阶段 5.12：把用户的自定义凭据附加到请求上
-  //   · 云端 Key 走 Header（x-custom-api-key），不进 URL，也不进请求体日志
-  //   · 本地地址 / 模型名走 body
-  function buildRequestExtras() {
-    const keys = window.MochiChatCustomKeys;
-    const extras = { headers: {}, body: {} };
-    if (keys && typeof keys.requestExtras === 'function') {
-      const got = keys.requestExtras();
-      Object.assign(extras.headers, got.headers || {});
-      Object.assign(extras.body, got.body || {});
-    }
-    if (!extras.headers['Content-Type']) extras.headers['Content-Type'] = 'application/json';
-    return extras;
   }
 
   function setMessage(text, kind) {
@@ -104,280 +76,117 @@
     messageEl.className = 'provider-message' + (kind ? ' is-' + kind : '');
   }
 
-  async function getJSON(url) {
-    const response = await fetch(url, { signal: timeoutSignal() });
-    const data = await response.json();
-    return { ok: response.ok, data: data };
+  // 纯前端判断当前配置：返回 { providerId, label, model, dimensions, usable }
+  function readProviderConfig() {
+    const keys = window.MochiChatCustomKeys;
+    if (!keys || typeof keys.getProviderInfo !== 'function') return null;
+    return keys.getProviderInfo();
   }
 
-  function providerText(item) {
-    if (item.usable) return '可用';
-    if (item.ready === false) return '未配置或未就绪';
-    if (item.lastErrorCode) return '不可用';
-    return '状态未知';
-  }
-
-  function failureText(data) {
-    const code = data && data.code ? data.code : 'switch_failed';
-    let hint = '';
-    if (code === 'local_unavailable') hint = '本地服务没有响应';
-    else if (code === 'local_model_missing') hint = '本地模型尚未下载';
-    else if (code === 'missing_api_key') hint = '云端未配置密钥';
-    else if (code === 'provider_not_ready') hint = '目标服务尚未就绪';
-    else if (code === 'unknown_provider') hint = '没有这个模型服务';
-    else if (code === 'switch_disabled') hint = '当前不支持切换';
-    else if (code === 'invalid_input') hint = '请求参数不正确';
-    const detail = data && data.message ? String(data.message) : '';
-    return (hint ? hint + '：' : '') + (detail || '切换失败') + '（' + code + '）';
-  }
-
-  // 渲染清单：每张卡片一个「切换到此」按钮
-  function render() {
-    listEl.innerHTML = '';
-
-    state.providers.forEach(function (item) {
-      const li = document.createElement('li');
-      li.className = 'provider-card' + (item.isCurrent ? ' is-current' : '');
-
-      const head = document.createElement('div');
-      head.className = 'provider-card-head';
-
-      const name = document.createElement('span');
-      name.className = 'provider-name';
-      name.textContent = item.label || item.providerId;
-      head.appendChild(name);
-
-      const badge = document.createElement('span');
-      badge.className = 'provider-badge' + (item.usable ? ' is-ok' : ' is-bad');
-      badge.textContent = providerText(item);
-      head.appendChild(badge);
-
-      li.appendChild(head);
-
-      const meta = document.createElement('p');
-      meta.className = 'provider-meta';
-      const parts = [];
-      if (item.model) parts.push('模型：' + item.model);
-      if (item.dimensions != null) parts.push('维度：' + item.dimensions);
-      meta.textContent = parts.join(' · ') || '模型信息未知';
-      li.appendChild(meta);
-
-      const action = document.createElement('button');
-      action.type = 'button';
-      action.className = 'provider-action';
-      if (item.isCurrent) {
-        action.textContent = '正在使用';
-        action.disabled = true;
-      } else if (!item.usable) {
-        action.textContent = '不可切换';
-        action.disabled = true;
-        // 失败原因直接写在这里，用户不用点也知道为什么不能选
-        if (item.lastErrorMessage) {
-          const why = document.createElement('p');
-          why.className = 'provider-why';
-          why.textContent = item.lastErrorMessage + (item.lastErrorCode ? '（' + item.lastErrorCode + '）' : '');
-          li.appendChild(why);
-        }
-      } else if (state.phase === 'switching' && state.pendingProviderId === item.providerId) {
-        action.textContent = '切换中…';
-        action.disabled = true;
-      } else if (state.phase === 'switching' || state.phase === 'checking') {
-        action.textContent = '切换到此';
-        action.disabled = true;
-      } else {
-        action.textContent = '切换到此';
-        action.disabled = !state.switchingEnabled;
-        action.addEventListener('click', function () {
-          switchTo(item.providerId);
-        });
-      }
-      li.appendChild(action);
-
-      listEl.appendChild(li);
-    });
+  function providerLabel(info) {
+    if (!info) return '未配置';
+    if (info.providerId === 'cloud-bailian') return '云端百炼';
+    if (info.providerId === 'local-ollama') return '本地 Ollama';
+    return info.providerId;
   }
 
   function renderCurrent() {
-    const current = state.providers.find(function (p) { return p.isCurrent; });
-    const identity = window.MochiChatAI && window.MochiChatAI.getState
-      ? window.MochiChatAI.getState().activeIdentity
-      : null;
-
-    if (current) {
-      const bits = ['当前：' + (current.label || current.providerId)];
-      if (current.model) bits.push(current.model);
-      if (current.dimensions != null) bits.push(current.dimensions + ' 维');
-      bits.push(current.usable ? '可用' : '不可用');
-      currentEl.textContent = bits.join(' · ');
+    const info = readProviderConfig();
+    if (!info) {
+      currentEl.textContent = '当前：未配置模型服务（仅关键词匹配）';
       return;
     }
-    if (identity) {
-      currentEl.textContent = '当前：' + identity.providerId + ' · ' + identity.model + ' · ' + identity.dimensions + ' 维';
-      return;
-    }
-    currentEl.textContent = '正在读取当前模型…';
+    const bits = ['当前：' + providerLabel(info)];
+    if (info.model) bits.push(info.model);
+    if (info.dimensions != null) bits.push(info.dimensions + ' 维');
+    currentEl.textContent = bits.join(' · ');
   }
 
-  // 读取状态：先 status（当前身份语义），再 providers（清单与各自状态）
-  // silent = true 时只刷新数据，不动界面上的状态文字（避免把失败提示冲掉）
-  async function refresh(options) {
-    const settings = options || {};
-    if (!settings.silent) {
-      state.phase = 'checking';
-      setMessage('检查中：正在确认各模型服务的状态…', 'info');
+  function render() {
+    listEl.innerHTML = '';
+    const info = readProviderConfig();
+    const detail = document.createElement('li');
+    detail.className = 'provider-card' + (info ? ' is-current' : '');
+
+    const head = document.createElement('div');
+    head.className = 'provider-card-head';
+    const name = document.createElement('span');
+    name.className = 'provider-name';
+    name.textContent = info ? providerLabel(info) : '未配置任何模型服务';
+    head.appendChild(name);
+
+    const badge = document.createElement('span');
+    badge.className = 'provider-badge is-ok';
+    badge.textContent = info ? '已启用（直接调用官方接口）' : '未启用';
+    head.appendChild(badge);
+    detail.appendChild(head);
+
+    const meta = document.createElement('p');
+    meta.className = 'provider-meta';
+    if (info) {
+      const parts = [];
+      if (info.model) parts.push('模型：' + info.model);
+      if (info.dimensions != null) parts.push('维度：' + info.dimensions);
+      meta.textContent = parts.join(' · ') || '模型信息未知';
+    } else {
+      meta.textContent = '在上方填写云端 Key 或本地 Ollama 地址后即可启用向量召回';
     }
+    detail.appendChild(meta);
+    listEl.appendChild(detail);
+  }
+
+  // 读取配置并刷新界面（纯前端，不发任何网络请求）
+  async function refresh() {
+    state.phase = 'idle';
+    state.errorCode = null;
+    renderCurrent();
     render();
+    setMessage('');
+    return true;
+  }
 
-    try {
-      const status = await getJSON('/api/embedding/status');
-      if (status.ok && status.data) {
-        state.currentProviderId = status.data.currentProviderId || state.currentProviderId;
-        state.defaultProviderId = status.data.defaultProviderId || state.defaultProviderId;
-        if (status.data.current && status.data.current.providerId) {
-          state.currentProviderId = status.data.current.providerId;
-        }
-      }
-    } catch (error) {
-      // status 读不到不影响主流程，稍后用 providers 渲染
-    }
-
-    // 阶段 5.12：填了自定义凭据时，体检必须针对用户自己的配置，
-    // 改走 POST /api/embedding/test（Key 走 Header，绝不进 URL）
-    const keys = window.MochiChatCustomKeys;
-    const usingCustom = Boolean(keys && typeof keys.hasAny === 'function' && keys.hasAny());
-
-    try {
-      let remote;
-      if (usingCustom) {
-        const packed = buildRequestExtras();
-        const resp = await fetch('/api/embedding/test', {
-          method: 'POST',
-          headers: packed.headers,
-          body: JSON.stringify(packed.body),
-          signal: timeoutSignal()
-        });
-        const data = await resp.json().catch(function () { return null; });
-        remote = { ok: resp.ok, data: data };
-      } else {
-        remote = await getJSON('/api/embedding/providers');
-      }
-
-      const data = remote.data || {};
-      if (!remote.ok || data.status !== 'ok') {
-        throw new Error((data && data.message) || '供应商清单读取失败');
-      }
-
-      // test 接口与 providers 接口字段略有差异，统一成面板所需形状
-      const list = usingCustom ? (data.results || []) : (data.providers || []);
-      state.providers = list.map(function (item) {
-        return {
-          providerId: item.providerId,
-          label: item.label,
-          model: item.model,
-          dimensions: item.dimensions,
-          isCurrent: item.isCurrent === true || item.providerId === state.currentProviderId,
-          usable: usingCustom
-            ? (item.usable === true || item.ok === true)
-            : item.usable === true,
-          ready: item.ready === true,
-          lastErrorCode: item.lastErrorCode || item.code || null,
-          lastErrorMessage: item.lastErrorMessage || item.message || null
-        };
-      });
-      state.currentProviderId = data.currentProviderId || state.currentProviderId;
-      state.defaultProviderId = data.defaultProviderId || state.defaultProviderId;
-      state.switchingEnabled = data.switchingEnabled !== false;
-      if (!settings.silent) {
-        state.phase = 'idle';
-        setMessage('');
-      }
-      renderCurrent();
-      render();
-      return true;
-    } catch (error) {
-      if (!settings.silent) {
-        state.phase = 'error';
-        state.errorCode = 'status_unavailable';
-        setMessage('读取模型服务状态失败：' + (error && error.message ? error.message : '未知错误') + '（status_unavailable）', 'error');
-      }
-      renderCurrent();
-      render();
+  // 前端连通性测试：直接发一次真实向量请求（云端 / 本地），验证配置是否可用
+  async function testConnection() {
+    const info = readProviderConfig();
+    if (!info) {
+      state.phase = 'error';
+      state.errorCode = 'no_provider';
+      setMessage('尚未填写任何模型服务，无法测试（请填写云端 Key 或本地 Ollama 地址）', 'error');
       return false;
     }
-  }
 
-  // 切换：先本地判定目标是否可用（检查），再发切换请求（切换中）
-  async function switchTo(providerId) {
-    if (state.phase === 'switching' || state.phase === 'checking') return false;
-
-    const target = state.providers.find(function (p) { return p.providerId === providerId; });
-    const label = target && target.label ? target.label : providerId;
-
-    // 切换全过程锁住输入框：这期间发出的请求都会用错身份，一律不接受
+    state.phase = 'testing';
+    setMessage('正在验证 ' + providerLabel(info) + ' 是否可用…', 'info');
+    render();
     lockComposer(true);
 
     try {
-      // ① 检查中：目标不可用就直接拦下，原供应商一动不动
-      if (!target || !target.usable) {
-        state.phase = 'error';
-        state.errorCode = 'provider_not_ready';
-        const why = target && target.lastErrorMessage ? target.lastErrorMessage : '目标服务尚未就绪';
-        const code = target && target.lastErrorCode ? target.lastErrorCode : 'provider_not_ready';
-        setMessage('检查未通过：' + label + ' 暂时不能使用，已保留当前模型。原因：' + why + '（' + code + '）', 'error');
-        render();
-        return false;
-      }
-
-      state.phase = 'switching';
-      state.pendingProviderId = providerId;
-      setMessage('检查中：正在确认 ' + label + ' 是否可用…', 'info');
-      render();
-
-      let data = null;
-      try {
-      const extras = buildRequestExtras();
-      const response = await fetch('/api/embedding/switch', {
-        method: 'POST',
-        headers: extras.headers,
-        body: JSON.stringify(Object.assign({ providerId: providerId }, extras.body)),
-        signal: timeoutSignal()
-      });
-      data = await response.json();
-
-      if (!response.ok || !data || data.status !== 'ok') {
-        state.phase = 'error';
-        state.errorCode = data && data.code ? data.code : 'switch_failed';
-        setMessage('切换中：' + label + ' 切换失败，已保留当前模型。' + failureText(data), 'error');
-        state.pendingProviderId = null;
-        await refresh({ silent: true });
-        return false;
-      }
-      } catch (error) {
-        state.phase = 'error';
-        state.errorCode = 'switch_failed';
-        setMessage('切换中：无法连接到本地服务，已保留当前模型。（switch_failed）', 'error');
-        state.pendingProviderId = null;
-        await refresh({ silent: true });
-        return false;
-      }
-
-      // ② 切换成功：复用既有身份失效机制，让旧向量与旧召回结果作废
-      setMessage('切换中：已切到 ' + label + '，正在刷新模型身份…', 'info');
+      const keys = window.MochiChatCustomKeys;
+      // 用一句固定文本做探针，拿到真实维度即可证明链路通
+      const result = await keys.embed(['__mochi_connectivity_probe__']);
+      const dims = result && result.embeddings && result.embeddings[0] ? result.embeddings[0].length : null;
+      // 切换成功：复用既有身份失效机制，让旧向量与旧召回结果作废
       if (window.MochiChatAI && typeof window.MochiChatAI.refreshIdentity === 'function') {
         await window.MochiChatAI.refreshIdentity();
       }
-
-      state.pendingProviderId = null;
-      await refresh({ silent: true });
-      state.phase = 'done';
-      const model = data && data.model ? data.model : '';
-      const dims = data && data.dimensions != null ? data.dimensions + ' 维' : '';
-      const detail = [model, dims].filter(Boolean).join(' · ');
-      setMessage('已切换到 ' + label + (detail ? '（' + detail + '）' : '') + '，后续向量请求将使用新模型。', 'success');
+      state.phase = 'ok';
+      setMessage('连接成功' + (dims ? '（向量维度 ' + dims + '）' : '') + '，后续向量请求将使用 ' + providerLabel(info) + '。', 'success');
+      renderCurrent();
       render();
       return true;
+    } catch (error) {
+      // Ollama 跨域是常见坑，给出明确提示
+      const code = error && error.code ? error.code : '';
+      let hint = (error && error.message) ? String(error.message) : '连接失败';
+      if (code === 'local_unavailable' || /OLLAMA_ORIGINS|跨域|CORS/i.test(hint)) {
+        hint = '本地 Ollama 连接失败：请确认服务已启动，并在运行 Ollama 的电脑上设置环境变量 OLLAMA_ORIGINS="*" 以允许浏览器跨域访问。';
+      }
+      state.phase = 'error';
+      state.errorCode = code || 'test_failed';
+      setMessage('连接失败：' + hint + '（' + state.errorCode + '）', 'error');
+      render();
+      return false;
     } finally {
-      // 无论成功还是失败，都要把聊天框还给用户
       lockComposer(false);
     }
   }
@@ -394,6 +203,7 @@
   if (openBtn) openBtn.addEventListener('click', open);
   if (closeBtn) closeBtn.addEventListener('click', close);
   if (refreshBtn) refreshBtn.addEventListener('click', function () { refresh(); });
+  if (testBtn) testBtn.addEventListener('click', function () { testConnection(); });
 
   modal.addEventListener('click', function (event) {
     if (event.target && event.target.hasAttribute && event.target.hasAttribute('data-close')) close();
@@ -403,30 +213,24 @@
     if (event.key === 'Escape' && !modal.hidden) close();
   });
 
-  // 对外只暴露调试/测试所需的最小接口（不含任何敏感信息）
+  // 对外只暴露调试 / 测试所需的最小接口（不含任何敏感信息）
   window.MochiChatProviderUI = {
     open: open,
     close: close,
     refresh: refresh,
-    switchTo: switchTo,
+    testConnection: testConnection,
     getState: function () {
       return {
         phase: state.phase,
         errorCode: state.errorCode,
         message: state.message,
         currentProviderId: state.currentProviderId,
-        defaultProviderId: state.defaultProviderId,
-        switchingEnabled: state.switchingEnabled,
-        pendingProviderId: state.pendingProviderId,
-        composerLocked: lockedBySwitch,
         providers: state.providers.map(function (p) {
           return {
             providerId: p.providerId,
             label: p.label,
             model: p.model,
-            dimensions: p.dimensions,
-            isCurrent: p.isCurrent === true,
-            usable: p.usable === true
+            dimensions: p.dimensions
           };
         })
       };

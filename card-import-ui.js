@@ -408,7 +408,7 @@
     return count;
   }
 
-  // 8.2 语义相似度：复用现有 /api/embed，不碰 Provider 与缓存
+  // 8.2 语义相似度：复用前端向量请求，不碰 Provider 与缓存
   function cosine(a, b) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length || a.length === 0) return 0;
     let dot = 0, na = 0, nb = 0;
@@ -422,28 +422,21 @@
   }
 
   async function embedTexts(texts) {
+    const keys = window.MochiChatCustomKeys;
+    if (!keys || typeof keys.embed !== 'function') return null;
+
     const vectors = [];
     for (let start = 0; start < texts.length; start += EMBED_CHUNK) {
       const chunk = texts.slice(start, start + EMBED_CHUNK);
-      let response, data;
+      let result;
       try {
-        // 阶段 5.12：导入去重也带上自定义凭据（Key 走 Header，本地地址 / 模型走 Body）
-        const extras = (window.MochiChatCustomKeys && typeof window.MochiChatCustomKeys.requestExtras === 'function')
-          ? window.MochiChatCustomKeys.requestExtras()
-          : { headers: {}, body: {} };
-        response = await fetch('/api/embed', {
-          method: 'POST',
-          headers: Object.assign({ 'Content-Type': 'application/json' }, extras.headers || {}),
-          body: JSON.stringify(Object.assign({ texts: chunk }, extras.body || {})),
-          signal: AbortSignal.timeout(EMBED_TIMEOUT_MS)
-        });
-        data = await response.json();
+        // 阶段 8：直接走前端向量请求（云端百炼 / 本地 Ollama），不再依赖本机后端
+        result = await keys.embed(chunk);
       } catch (error) {
-        return null; // 超时或断网：静默降级
+        return null; // 超时 / 断网 / 未配置：静默降级到仅完全重复
       }
-      if (!response.ok || !data || data.status !== 'ok' || !Array.isArray(data.embeddings)) return null;
-      if (data.embeddings.length !== chunk.length) return null;
-      data.embeddings.forEach(function (v) { vectors.push(v); });
+      if (!result || !Array.isArray(result.embeddings) || result.embeddings.length !== chunk.length) return null;
+      result.embeddings.forEach(function (v) { vectors.push(v); });
     }
     return vectors;
   }

@@ -54,7 +54,7 @@
   }
 
   const state = {
-    available: false,     // 后端 /api/embed 是否可用
+    available: false,     // 是否已配置可用的模型服务（云端 Key / 本地 Ollama）
     probeDone: false,
     enabled: true,        // 用户开关
     threshold: DEFAULT_THRESHOLD,
@@ -62,7 +62,7 @@
     last: null,           // 最近一次 AI 召回结果（仅用于调试显示）
     requests: 0,          // 已发出的向量请求次数（便于了解用量）
     vectorCache: new Map(),
-    // 当前生效的向量身份（来自 /api/health，并在每次 /api/embed 响应后自校验）
+    // 当前生效的向量身份（来自用户在「模型服务」面板里的配置，并在每次向量响应后自校验）
     activeIdentity: identityOf('cloud-bailian', 'text-embedding-v4', 1024, ''),
     // 身份每变化一次就自增：在途请求凭它判断自己是否已经过期
     identityVersion: 0,
@@ -141,7 +141,7 @@
     return identityKey(state.activeIdentity) + '|' + text;
   }
 
-  // ===== 2. 调用后端 /api/embed（带内存缓存，失败不重试）=====
+  // ===== 2. 调用前端向量请求（带内存缓存，失败不重试）=====
   // 后端错误码 → 用户看得懂的中文（阶段 3.7）
   // 关键词匹配永远可用，所以这些提示都只需要说明「已自动回退」
   const FRIENDLY_ERRORS = {
@@ -180,33 +180,25 @@
     // 记下出发时的身份版本：期间若发生变化，说明这个响应已经过期
     const versionAtStart = state.identityVersion;
 
-    let response;
+    let result;
     try {
-      // 阶段 5.12：带上自定义凭据（Key 走 Header，本地地址 / 模型走 Body）。
-      // 没有配置时 requestExtras 返回空对象，行为与从前完全一致；明文 Key 只在这条请求里存在
-      const extras = (window.MochiChatCustomKeys && typeof window.MochiChatCustomKeys.requestExtras === 'function')
-        ? window.MochiChatCustomKeys.requestExtras()
-        : { headers: {}, body: {} };
-      response = await fetch('/api/embed', {
-        method: 'POST',
-        headers: Object.assign({ 'Content-Type': 'application/json' }, extras.headers || {}),
-        body: JSON.stringify(Object.assign({ texts: texts }, extras.body || {})),
-        signal: AbortSignal.timeout(EMBED_TIMEOUT_MS)
-      });
+      // 阶段 8：不再走本机 /api/embed，改为纯前端直接请求（云端百炼 / 本地 Ollama），
+      // 由 MochiChatCustomKeys 负责带 Key / 地址并直连官方接口。
+      // 没填任何凭据时 embed() 会抛 no_provider，下方统一翻译成「已降级」。
+      const keys = window.MochiChatCustomKeys;
+      if (!keys || typeof keys.embed !== 'function') {
+        const e = new Error('未配置模型服务');
+        e.code = 'no_provider';
+        throw e;
+      }
+      result = await keys.embed(texts);
     } catch (error) {
-      // 超时或断网：统一带上 code，便于后面翻译成人话
-      const timedOut = Boolean(error && (error.name === 'TimeoutError' || error.name === 'AbortError'));
-      const wrapped = new Error(timedOut ? '向量请求超时' : String((error && error.message) || '网络请求失败'));
-      wrapped.code = timedOut ? 'request_timeout' : 'network_error';
+      // 超时 / 断网 / 没填 Key：统一带上 code，便于后面翻译成人话
+      const wrapped = new Error(error && error.message ? error.message : '向量请求失败');
+      wrapped.code = (error && error.code) ? error.code : 'network_error';
       throw wrapped;
     }
 
-    const data = await response.json().catch(function () { return null; });
-    if (!response.ok || !data || data.status !== 'ok') {
-      const failure = new Error((data && data.message) || ('HTTP ' + response.status));
-      failure.code = data && data.code ? data.code : ('http_' + response.status);
-      throw failure;
-    }
     state.requests++;
     // 过期的响应直接丢掉：绝不让旧身份的数据写进新身份
     if (state.identityVersion !== versionAtStart) {
@@ -214,12 +206,12 @@
     }
     // 自校验：响应里的 providerId / model / dimensions / credentialsToken 与当前身份不一致就作废旧数据
     syncIdentity({
-      providerId: data.providerId,
-      model: data.model,
-      dimensions: data.dimensions,
-      credentialsToken: data.credentialsToken
+      providerId: result.providerId,
+      model: result.model,
+      dimensions: result.dimensions,
+      credentialsToken: result.credentialsToken
     });
-    return data.embeddings;
+    return result.embeddings;
   }
 
   async function embedMany(texts) {
@@ -438,7 +430,7 @@
     const usable = Boolean(record && record.status === 'ready');
 
     if (!state.available || !state.enabled) {
-      aiInfo.reason = state.available ? '已手动关闭 AI 向量匹配' : '后端不可用（没有启动服务器）';
+      aiInfo.reason = state.available ? '已手动关闭 AI 向量匹配' : '未配置模型服务（仅关键词匹配）';
     } else if (!record) {
       aiInfo.reason = '尚未发起向量请求';
     } else if (record.status === 'pending') {
@@ -619,24 +611,22 @@
     head.insertBefore(label, head.querySelector('.debug-toggle'));
   }
 
-  // ===== 8. 启动时探测后端是否可用 =====
+  // ===== 8. 启动时判断向量服务是否可用（纯前端，不再探测后端）=====
+  // 阶段 8：可用性完全由「用户是否配置了模型服务」决定——
+  //   填了云端 Key 或本地 Ollama 地址即视为可用，否则降级到关键词匹配。
   async function probe() {
-    try {
-      const response = await fetch('/api/health', { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
-      const data = await response.json();
-      if (response.ok && data && data.features && data.features.embeddingApi === true) {
-        state.available = true;
-        // 初始身份来自健康检查：providerId / model / dimensions
-        syncIdentity({
-          providerId: data.provider && data.provider.id,
-          model: data.embedding && data.embedding.model,
-          dimensions: data.embedding && data.embedding.dimensions
-        });
-      } else {
-        state.available = false;
-      }
-    } catch (error) {
-      state.available = false; // 例如直接双击打开 index.html（file://）时无法连接
+    const keys = window.MochiChatCustomKeys;
+    const info = (keys && typeof keys.getProviderInfo === 'function') ? keys.getProviderInfo() : null;
+    if (info) {
+      state.available = true;
+      // 初始身份来自用户配置：providerId / model / dimensions
+      syncIdentity({
+        providerId: info.providerId,
+        model: info.model,
+        dimensions: info.dimensions
+      });
+    } else {
+      state.available = false;
     }
     state.probeDone = true;
     state.enabled = state.available;
@@ -644,27 +634,26 @@
     return state.available;
   }
 
-  // 只刷新身份，不动用户的开关状态（阶段 3.5：切换供应商后由设置面板调用）
-  // 内部仍然走 syncIdentity：身份变了就递增版本并清空旧向量与旧召回结果
+  // 只刷新身份，不动用户的开关状态（切换供应商后由设置面板调用）
+  // 阶段 8：现在身份完全由前端配置推导，不再走任何后端接口
   async function refreshIdentity() {
-    try {
-      const response = await fetch('/api/health', { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
-      const data = await response.json();
-      if (!response.ok || !data) return null;
-      syncIdentity({
-        providerId: data.provider && data.provider.id,
-        model: data.embedding && data.embedding.model,
-        dimensions: data.embedding && data.embedding.dimensions
-      });
-      state.available = Boolean(data.features && data.features.embeddingApi === true);
-      return {
-        providerId: state.activeIdentity.providerId,
-        model: state.activeIdentity.model,
-        dimensions: state.activeIdentity.dimensions
-      };
-    } catch (error) {
+    const keys = window.MochiChatCustomKeys;
+    const info = (keys && typeof keys.getProviderInfo === 'function') ? keys.getProviderInfo() : null;
+    if (!info) {
+      state.available = false;
       return null;
     }
+    syncIdentity({
+      providerId: info.providerId,
+      model: info.model,
+      dimensions: info.dimensions
+    });
+    state.available = true;
+    return {
+      providerId: state.activeIdentity.providerId,
+      model: state.activeIdentity.model,
+      dimensions: state.activeIdentity.dimensions
+    };
   }
 
   probe();

@@ -10,6 +10,11 @@ const crypto = require('crypto');
 const { createBailianClient, BailianError, redact, normalizeBaseUrl } = require('../lib/bailian.js');
 const { validateTexts, ValidationError, cosineSimilarity, createEmbeddingCache } = require('../lib/vector.js');
 const { createApp } = require('../server.js');
+// 阶段 8：后端已剥离，本测试依赖 Node.js 后端代理，默认隐藏（set MOCHI_RUN_BACKEND_TESTS=1 可强行运行）
+if (process.env.MOCHI_RUN_BACKEND_TESTS !== '1') {
+  console.log('（跳过）' + __filename.split(/[\\/]/).pop() + '：依赖已废弃的 Node.js 后端，已隐藏。');
+  return;
+}
 
 // 运行时随机生成一串「假装是密钥」的字符串，避免任何明文密钥写进文件
 const TEST_KEY = 'TESTKEY-' + crypto.randomBytes(8).toString('hex');

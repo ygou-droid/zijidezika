@@ -8,6 +8,11 @@
 
 const crypto = require('crypto');
 const { createApp } = require('../server.js');
+// 阶段 8：后端已剥离，本测试依赖 Node.js 后端代理，默认隐藏（set MOCHI_RUN_BACKEND_TESTS=1 可强行运行）
+if (process.env.MOCHI_RUN_BACKEND_TESTS !== '1') {
+  console.log('（跳过）' + __filename.split(/[\\/]/).pop() + '：依赖已废弃的 Node.js 后端，已隐藏。');
+  return;
+}
 const { assertProvider, safeRedact, PROVIDER_INTERFACE_VERSION } = require('../lib/embedding/provider-contract.js');
 const { createCloudBailianProvider, PROVIDER_ID, PROVIDER_LABEL } = require('../lib/embedding/cloud-bailian.js');
 
